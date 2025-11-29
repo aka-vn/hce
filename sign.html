@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HCE - Chữ Ký Số</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesome-notifications/3.1.0/style.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesome-notifications/3.1.0/modern.var.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        iframe {
+            display: none;
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            border: none;
+            z-index: 1000;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <iframe id="contentFrame" src="about:blank"></iframe>
+
+    <script>
+        const BackendUrl = "https://script.google.com/macros/s/AKfycbyHD652mEepKDLtqzxcUVVY1UPzpAf0AUasb-ARAou1cjkJ3aphUpNp9J06kbCa9aEBHw/exec";
+        const notifier = new AWN({ option: "top-right" });
+        window.onload = function () {
+            let form = getQueryString("form");
+
+            if (form) {
+                loadFrameContent();
+            }
+        };
+
+        function getQueryString(param) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(param);
+        }
+
+        function handleQueryString(iframe, token) {
+            const form = getQueryString("form") || "forbidden";
+            const lite = getQueryString("lite") || 0;
+            const id = getQueryString("id") || "";
+            const qs = postProccessQs();
+            const engine = lite ? "lite" : "form";
+            iframe.src = token ? `${BackendUrl}?url=/${engine}/${form}/${id}&callback=${encodeURIComponent(token)}&${qs}` : `${BackendUrl}?url=/${engine}/${form}/${id}&${qs}`;
+        }
+
+        function postProccessQs() {
+            var qs = new URLSearchParams(window.location.search);
+            const resevered = ["url", "id", "form", "callback", "lite"];
+            const result = [];
+
+            for (const [key, value] of qs) {
+                if (!resevered.includes(key)) {
+                    result.push(`${key}=${encodeURIComponent(value)}`)
+                }
+            }
+
+            return result.join("&");
+        }
+
+        function loadFrameContent() {
+            var iframe = document.getElementById("contentFrame");
+            iframe.style.display = "block";
+            handleQueryString(iframe);
+        }
+
+        async function personal_sign(content) {
+            const accounts = await ethereum.request({ method: "eth_requestAccounts" });
+            const address = accounts[0];
+            const encoder = new TextEncoder();
+            const messageHex = "0x" + Array.from(encoder.encode(content))
+                .map(b => b.toString(16).padStart(2, "0"))
+                .join("");
+            const signature = await ethereum.request({
+                method: "personal_sign",
+                params: [messageHex, address]
+            });
+            return { address, signature };
+        }
+
+        window.addEventListener("message", async function (event) {
+            if (event.data) {
+                const action = event.data.action;
+
+                switch (action) {
+                    case "redirect":
+                        window.location.href = event.data.url;
+                        break;
+                    case "set_title":
+                        document.title = event.data.title;
+                        break;
+                    case "personal_sign":
+                        try {
+                            if (!window.ethereum) {
+                                notifier.warning("Vui lòng cài MetaMask!");
+                                return;
+                            }
+
+                            let { address, signature } = await personal_sign(event.data.content);
+
+                            if (address && signature) {
+                                event.source.postMessage({
+                                    action: "personal_sign_response",
+                                    success: true,
+                                    address,
+                                    signature
+                                }, event.origin);
+
+                                notifier.success("Ký thành công!");
+                            }
+                        } catch (err) {
+                            console.error(err);
+
+                            if (err.code === 4001) {
+                                notifier.warning("Bạn đã từ chối ký.");
+                            } else {
+                                notifier.warning("Lỗi: " + err.message);
+                            }
+
+                            event.source.postMessage({
+                                action: "personal_sign_response",
+                                success: false,
+                                error: err.message,                                
+                                code: err.code
+                            }, event.origin);
+                        }
+                        break;
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>
